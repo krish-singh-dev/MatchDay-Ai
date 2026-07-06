@@ -49,13 +49,15 @@ export default function App() {
   const [staffToken, setStaffToken] = useState<string | null>(null);
   const [activeAlertIdForModal, setActiveAlertIdForModal] = useState<string | null>(null);
 
-  const mockVenueId = 'venue-fifa-2026';
+  // Matches seeded UUID in Postgres database
+  const mockVenueId = '00000000-0000-0000-0000-000000000000';
 
   // Generate a valid mock JWT for staff operations console demonstration
   // This matches backend expectations for role 'staff'
   const simulateStaffLogin = async () => {
     try {
-      const res = await fetch('http://localhost:5000/api/v1/auth/login', {
+      const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+      const res = await fetch(`${baseUrl}/api/v1/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username: 'staff', password: 'password' }),

@@ -45,8 +45,11 @@ interface DashboardState {
   clearRecommendation: () => void;
 }
 
-const API_BASE_URL = 'http://localhost:5000/api/v1';
-const SOCKET_BASE_URL = 'http://localhost:5000';
+const API_BASE_URL = import.meta.env.VITE_API_URL 
+  ? `${import.meta.env.VITE_API_URL}/api/v1` 
+  : 'http://localhost:5000/api/v1';
+
+const SOCKET_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
 
 export const useDashboardStore = create<DashboardState>((set, get) => ({
   zones: [],
