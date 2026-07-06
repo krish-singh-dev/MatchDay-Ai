@@ -24,14 +24,14 @@ Write-Host "Containers are running successfully." -ForegroundColor Green
 
 # 3. Synchronize Database & Seed
 Write-Host "Syncing database schema via Prisma..." -ForegroundColor Yellow
-npx prisma db push --schema backend/prisma/schema.prisma
+npm run prisma:push --prefix backend
 if ($LASTEXITCODE -ne 0) {
     Write-Host "ERROR: Prisma database synchronization failed." -ForegroundColor Red
     Exit 1
 }
 
 Write-Host "Seeding database with MatchDay Arena zones..." -ForegroundColor Yellow
-npx prisma db seed --schema backend/prisma/schema.prisma
+npm run prisma:seed --prefix backend
 if ($LASTEXITCODE -ne 0) {
     Write-Host "ERROR: Database seeding failed." -ForegroundColor Red
     Exit 1

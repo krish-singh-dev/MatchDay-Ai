@@ -1,0 +1,69 @@
+name: Deploy to Google Cloud Run
+
+on:
+  push:
+    branches:
+      - main
+
+env:
+  PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+  REGION: us-central1
+  BACKEND_SERVICE_NAME: matchday-backend
+  FRONTEND_SERVICE_NAME: matchday-frontend
+
+jobs:
+  deploy:
+    name: Deploy to Cloud Run
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Authenticate with Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker
+        run: gcloud auth configure-docker --quiet
+
+      # Build & Push Backend
+      - name: Build Backend Image
+        run: docker build -t gcr.io/$PROJECT_ID/$BACKEND_SERVICE_NAME:$GITHUB_SHA -f backend/Dockerfile .
+
+      - name: Push Backend Image to GCR
+        run: docker push gcr.io/$PROJECT_ID/$BACKEND_SERVICE_NAME:$GITHUB_SHA
+
+      # Build & Push Frontend
+      - name: Build Frontend Image
+        run: docker build -t gcr.io/$PROJECT_ID/$FRONTEND_SERVICE_NAME:$GITHUB_SHA -f frontend/Dockerfile .
+
+      - name: Push Frontend Image to GCR
+        run: docker push gcr.io/$PROJECT_ID/$FRONTEND_SERVICE_NAME:$GITHUB_SHA
+
+      # Deploy Backend to Cloud Run
+      - name: Deploy Backend to Cloud Run
+        uses: google-github-actions/deploy-cloudrun@v2
+        with:
+          service: ${{ env.BACKEND_SERVICE_NAME }}
+          image: gcr.io/${{ env.PROJECT_ID }}/${{ env.BACKEND_SERVICE_NAME }}:${{ env.GITHUB_SHA }}
+          region: ${{ env.REGION }}
+          flags: |
+            --allow-unauthenticated
+            --port=5000
+            --set-env-vars=DATABASE_URL=${{ secrets.DATABASE_URL }},REDIS_URL=${{ secrets.REDIS_URL }},JWT_SECRET=${{ secrets.JWT_SECRET }},GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}
+
+      # Deploy Frontend to Cloud Run
+      - name: Deploy Frontend to Cloud Run
+        uses: google-github-actions/deploy-cloudrun@v2
+        with:
+          service: ${{ env.FRONTEND_SERVICE_NAME }}
+          image: gcr.io/${{ env.PROJECT_ID }}/${{ env.FRONTEND_SERVICE_NAME }}:${{ env.GITHUB_SHA }}
+          region: ${{ env.REGION }}
+          flags: |
+            --allow-unauthenticated
+            --port=80
