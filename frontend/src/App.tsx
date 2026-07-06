@@ -56,8 +56,11 @@ export default function App() {
   // This matches backend expectations for role 'staff'
   const simulateStaffLogin = async () => {
     try {
-      const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:5000';
-      const res = await fetch(`${baseUrl}/api/v1/auth/login`, {
+      let rawUrl = '__VITE_API_URL__';
+      if (rawUrl.startsWith('__VITE') || !rawUrl) {
+        rawUrl = 'http://localhost:5000';
+      }
+      const res = await fetch(`${rawUrl}/api/v1/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username: 'staff', password: 'password' }),

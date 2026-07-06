@@ -19,9 +19,11 @@ interface ChatState {
   clearChat: () => void;
 }
 
-const API_BASE_URL = import.meta.env.VITE_API_URL 
-  ? `${import.meta.env.VITE_API_URL}/api/v1` 
-  : 'http://localhost:5000/api/v1';
+let rawUrl = '__VITE_API_URL__';
+if (rawUrl.startsWith('__VITE') || !rawUrl) {
+  rawUrl = 'http://localhost:5000';
+}
+const API_BASE_URL = `${rawUrl}/api/v1`;
 
 export const useChatStore = create<ChatState>((set, get) => ({
   messages: [],
