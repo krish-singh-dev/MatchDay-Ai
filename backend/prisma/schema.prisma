@@ -1,0 +1,129 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum Role {
+  fan
+  staff
+  admin
+}
+
+enum ZoneType {
+  gate
+  concourse
+  transit
+  restroom
+  concession
+  exit
+}
+
+enum Severity {
+  info
+  warning
+  critical
+}
+
+model User {
+  id                String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  role              Role        @default(fan)
+  preferredLanguage String      @map("preferred_language") @db.VarChar(10)
+  createdAt         DateTime    @default(now()) @map("created_at") @db.Timestamptz
+  
+  // Relations
+  acknowledgedAlerts Alert[]    @relation("UserAlerts")
+  chatQueries        ChatQuery[]
+
+  @@map("users")
+}
+
+model Venue {
+  id        String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name      String      @db.VarChar(255)
+  city      String      @db.VarChar(255)
+  capacity  Int
+  createdAt DateTime    @default(now()) @map("created_at") @db.Timestamptz
+  
+  // Relations
+  zones       Zone[]
+  chatQueries ChatQuery[]
+
+  @@map("venues")
+}
+
+model Zone {
+  id             String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  venueId        String     @map("venue_id") @db.Uuid
+  name           String     @db.VarChar(255)
+  zoneType       ZoneType   @map("zone_type")
+  maxCapacity    Int        @map("max_capacity")
+  geoCoordinates Json       @map("geo_coordinates")
+  
+  // Relations
+  venue           Venue            @relation(fields: [venueId], references: [id], onDelete: Cascade)
+  densityReadings DensityReading[]
+  alerts          Alert[]
+
+  @@map("zones")
+}
+
+model DensityReading {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  zoneId         String   @map("zone_id") @db.Uuid
+  estimatedCount Int      @map("estimated_count")
+  densityPct     Decimal  @map("density_pct") @db.Decimal(5, 2)
+  recordedAt     DateTime @default(now()) @map("recorded_at") @db.Timestamptz
+  
+  // Relations
+  zone Zone @relation(fields: [zoneId], references: [id], onDelete: Cascade)
+
+  @@map("density_readings")
+}
+
+model Alert {
+  id               String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  zoneId           String    @map("zone_id") @db.Uuid
+  severity         Severity
+  aiRecommendation String    @map("ai_recommendation") @db.Text
+  acknowledgedBy   String?   @map("acknowledged_by") @db.Uuid
+  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  resolvedAt       DateTime? @map("resolved_at") @db.Timestamptz
+  
+  // Relations
+  zone         Zone  @relation(fields: [zoneId], references: [id], onDelete: Cascade)
+  acknowledged User? @relation("UserAlerts", fields: [acknowledgedBy], references: [id])
+
+  @@map("alerts")
+}
+
+model ChatQuery {
+  id               String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId           String?  @map("user_id") @db.Uuid
+  venueId          String   @map("venue_id") @db.Uuid
+  queryText        String   @map("query_text") @db.Text
+  detectedLanguage String   @map("detected_language") @db.VarChar(10)
+  responseText     String   @map("response_text") @db.Text
+  wasCached        Boolean  @default(false) @map("was_cached")
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz
+  
+  // Relations
+  user  User?  @relation(fields: [userId], references: [id])
+  venue Venue  @relation(fields: [venueId], references: [id])
+
+  @@map("chat_queries")
+}
+
+model TranslationCache {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  queryHash    String   @unique @map("query_hash") @db.VarChar(64)
+  language     String   @db.VarChar(10)
+  responseText String   @map("response_text") @db.Text
+  hitCount     Int      @default(0) @map("hit_count")
+  updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  @@map("translation_cache")
+}
