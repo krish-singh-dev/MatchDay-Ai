@@ -6,7 +6,7 @@ on:
       - main
 
 env:
-  PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+  PROJECT_ID: matchday-ai-501611
   REGION: us-central1
   BACKEND_SERVICE_NAME: matchday-backend
   FRONTEND_SERVICE_NAME: matchday-frontend
@@ -16,14 +16,20 @@ jobs:
     name: Deploy to Cloud Run
     runs-on: ubuntu-latest
 
+    # Required permissions for keyless OIDC authentication
+    permissions:
+      contents: read
+      id-token: write
+
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Authenticate with Google Cloud
+      - name: Authenticate with Google Cloud (Keyless OIDC)
         uses: google-github-actions/auth@v2
         with:
-          credentials_json: ${{ secrets.GCP_SA_KEY }}
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
 
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v2
