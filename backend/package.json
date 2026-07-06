@@ -2,10 +2,10 @@
   "name": "matchday-backend",
   "version": "1.0.0",
   "description": "MatchDay AI Express Backend",
-  "main": "dist/src/server.js",
+  "main": "dist/backend/src/server.js",
   "scripts": {
     "build": "tsc",
-    "start": "node dist/src/server.js",
+    "start": "node dist/backend/src/server.js",
     "dev": "nodemon src/server.ts",
     "test": "jest --runInBand --detectOpenHandles",
     "prisma:generate": "prisma generate",
