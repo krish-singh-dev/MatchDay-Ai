@@ -1,26 +1,36 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.STADIUM_EDGES = exports.STADIUM_ZONES = void 0;
+exports.STADIUM_EDGES = exports.STADIUM_ZONES = exports.ZONES = void 0;
 exports.findRoute = findRoute;
+// Valid UUID strings that PostgreSQL accepts
+exports.ZONES = {
+    GATE_A: '00000000-0000-0000-0000-000000000001',
+    GATE_B: '00000000-0000-0000-0000-000000000002',
+    TRANSIT_EXIT: '00000000-0000-0000-0000-000000000003',
+    CONCOURSE_NORTH: '00000000-0000-0000-0000-000000000004',
+    CONCOURSE_SOUTH: '00000000-0000-0000-0000-000000000005',
+    RESTROOMS: '00000000-0000-0000-0000-000000000006',
+    CONCESSIONS: '00000000-0000-0000-0000-000000000007',
+};
 exports.STADIUM_ZONES = [
-    { id: 'gate-a', name: 'Gate A Concourse', x: 100, y: 150 },
-    { id: 'gate-b', name: 'Gate B Transit', x: 300, y: 150 },
-    { id: 'transit-exit', name: 'North Transit Link', x: 200, y: 50 },
-    { id: 'concourse-north', name: 'Concourse North', x: 200, y: 220 },
-    { id: 'concourse-south', name: 'Concourse South', x: 200, y: 350 },
-    { id: 'restrooms', name: 'Concourse Restrooms', x: 80, y: 280 },
-    { id: 'concessions', name: 'Food Concessions', x: 320, y: 280 },
+    { id: exports.ZONES.GATE_A, name: 'Gate A Concourse', x: 100, y: 150 },
+    { id: exports.ZONES.GATE_B, name: 'Gate B Transit', x: 300, y: 150 },
+    { id: exports.ZONES.TRANSIT_EXIT, name: 'North Transit Link', x: 200, y: 50 },
+    { id: exports.ZONES.CONCOURSE_NORTH, name: 'Concourse North', x: 200, y: 220 },
+    { id: exports.ZONES.CONCOURSE_SOUTH, name: 'Concourse South', x: 200, y: 350 },
+    { id: exports.ZONES.RESTROOMS, name: 'Concourse Restrooms', x: 80, y: 280 },
+    { id: exports.ZONES.CONCESSIONS, name: 'Food Concessions', x: 320, y: 280 },
 ];
 exports.STADIUM_EDGES = [
-    { from: 'gate-a', to: 'transit-exit', directions: 'Walk north-east towards the North Transit Link for 60m.' },
-    { from: 'gate-b', to: 'transit-exit', directions: 'Walk north-west towards the North Transit Link for 60m.' },
-    { from: 'gate-a', to: 'concourse-north', directions: 'Head south-east along the inner ring toward Concourse North.' },
-    { from: 'gate-b', to: 'concourse-north', directions: 'Head south-west along the inner ring toward Concourse North.' },
-    { from: 'concourse-north', to: 'concourse-south', directions: 'Walk straight down the main concourse pathway for 130m.' },
-    { from: 'concourse-north', to: 'restrooms', directions: 'Turn right at the signpost and walk 50m to the restrooms.' },
-    { from: 'concourse-north', to: 'concessions', directions: 'Turn left and walk 50m to the Food Concessions counter.' },
-    { from: 'concourse-south', to: 'restrooms', directions: 'Head north-west along the outer ring for 80m.' },
-    { from: 'concourse-south', to: 'concessions', directions: 'Head north-east along the outer ring for 80m.' },
+    { from: exports.ZONES.GATE_A, to: exports.ZONES.TRANSIT_EXIT, directions: 'Walk north-east towards the North Transit Link for 60m.' },
+    { from: exports.ZONES.GATE_B, to: exports.ZONES.TRANSIT_EXIT, directions: 'Walk north-west towards the North Transit Link for 60m.' },
+    { from: exports.ZONES.GATE_A, to: exports.ZONES.CONCOURSE_NORTH, directions: 'Head south-east along the inner ring toward Concourse North.' },
+    { from: exports.ZONES.GATE_B, to: exports.ZONES.CONCOURSE_NORTH, directions: 'Head south-west along the inner ring toward Concourse North.' },
+    { from: exports.ZONES.CONCOURSE_NORTH, to: exports.ZONES.CONCOURSE_SOUTH, directions: 'Walk straight down the main concourse pathway for 130m.' },
+    { from: exports.ZONES.CONCOURSE_NORTH, to: exports.ZONES.RESTROOMS, directions: 'Turn right at the signpost and walk 50m to the restrooms.' },
+    { from: exports.ZONES.CONCOURSE_NORTH, to: exports.ZONES.CONCESSIONS, directions: 'Turn left and walk 50m to the Food Concessions counter.' },
+    { from: exports.ZONES.CONCOURSE_SOUTH, to: exports.ZONES.RESTROOMS, directions: 'Head north-west along the outer ring for 80m.' },
+    { from: exports.ZONES.CONCOURSE_SOUTH, to: exports.ZONES.CONCESSIONS, directions: 'Head north-east along the outer ring for 80m.' },
 ];
 /**
  * BFS Graph solver to find the shortest path and return node coordinates and directions.
@@ -44,7 +54,6 @@ function findRoute(startId, endId) {
         adjList[edge.from].push(edge.to);
         adjList[edge.to].push(edge.from);
         edgeInfo[`${edge.from}_${edge.to}`] = edge.directions;
-        // Bidirectional edges might need reversed wording, but we keep it simple or reflect it
         edgeInfo[`${edge.to}_${edge.from}`] = edge.directions;
     });
     // Run BFS

@@ -10,9 +10,9 @@ dotenv_1.default.config();
 const allowedOrigin = process.env.CORS_ORIGIN || 'http://localhost:5173';
 exports.corsOptions = {
     origin: (origin, callback) => {
-        // Allow requests with no origin (like mobile apps, curl, or server-to-server)
-        // or if the origin matches our allowedOrigin
-        if (!origin || origin === allowedOrigin) {
+        // Allow requests with no origin or if origin matches our allowedOrigin
+        // or if it is a deployed Railway subdomain
+        if (!origin || origin === allowedOrigin || origin.endsWith('.up.railway.app')) {
             callback(null, true);
         }
         else {

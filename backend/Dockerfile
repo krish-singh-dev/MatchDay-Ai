@@ -1,7 +1,7 @@
 FROM node:20-alpine
 
-# Install OpenSSL and libc compatibility layers for Prisma engine
-RUN apk add --no-cache openssl libc6-compat
+# Install OpenSSL for Prisma engine
+RUN apk add --no-cache openssl
 
 WORKDIR /app
 
