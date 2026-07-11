@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import { Router, Request, Response } from 'express';
 import chatRoutes from './chat.routes';
 import navigationRoutes from './navigation.routes';
 import densityRoutes from './density.routes';
@@ -13,9 +13,11 @@ const apiRouter = Router();
 apiRouter.use('/chat', chatRoutes);
 apiRouter.use('/navigation', navigationRoutes);
 
-// For /api/v1/zones/:venueId
-const zonesRouter = Router();
-zonesRouter.get('/:venueId', async (req, res) => {
+/**
+ * GET /api/v1/zones/:venueId
+ * Returns all zones for a venue, each augmented with the most recent density reading.
+ */
+async function getZonesByVenue(req: Request, res: Response): Promise<void> {
   try {
     const { venueId } = req.params;
     const zones = await prisma.zone.findMany({
@@ -28,7 +30,7 @@ zonesRouter.get('/:venueId', async (req, res) => {
       },
     });
 
-    const formattedZones = zones.map((z) => {
+    const zonesWithLatestReading = zones.map((z) => {
       const reading = z.densityReadings[0];
       return {
         id: z.id,
@@ -43,12 +45,16 @@ zonesRouter.get('/:venueId', async (req, res) => {
       };
     });
 
-    res.status(200).json(formattedZones);
+    res.status(200).json(zonesWithLatestReading);
   } catch (error) {
     console.error('Error fetching zones:', error);
     res.status(500).json({ error: 'Failed to fetch zones' });
   }
-});
+}
+
+// For /api/v1/zones/:venueId
+const zonesRouter = Router();
+zonesRouter.get('/:venueId', getZonesByVenue);
 apiRouter.use('/zones', zonesRouter);
 
 // For /api/v1/density/ingest

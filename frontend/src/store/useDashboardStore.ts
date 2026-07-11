@@ -52,6 +52,17 @@ if (rawUrl.startsWith('__VITE') || !rawUrl) {
 const API_BASE_URL = `${rawUrl}/api/v1`;
 const SOCKET_BASE_URL = rawUrl;
 
+/** Returns a Bearer token Authorization header object. */
+const buildAuthHeaders = (token: string): Record<string, string> => ({
+  Authorization: `Bearer ${token}`,
+});
+
+/** Returns Bearer token + JSON content-type headers for POST requests. */
+const buildAuthJsonHeaders = (token: string): Record<string, string> => ({
+  ...buildAuthHeaders(token),
+  'Content-Type': 'application/json',
+});
+
 export const useDashboardStore = create<DashboardState>((set, get) => ({
   zones: [],
   activeAlerts: [],
@@ -66,14 +77,14 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
     try {
       // Fetch zones
       const zonesRes = await fetch(`${API_BASE_URL}/zones/${venueId}`, {
-        headers: { Authorization: `Bearer ${token}` },
+        headers: buildAuthHeaders(token),
       });
       if (!zonesRes.ok) throw new Error('Failed to fetch zones data.');
       const zonesData = await zonesRes.json();
 
       // Fetch active alerts
       const alertsRes = await fetch(`${API_BASE_URL}/alerts/active/${venueId}`, {
-        headers: { Authorization: `Bearer ${token}` },
+        headers: buildAuthHeaders(token),
       });
       if (!alertsRes.ok) throw new Error('Failed to fetch active alerts.');
       const alertsData = await alertsRes.json();
@@ -88,10 +99,7 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
     try {
       const res = await fetch(`${API_BASE_URL}/alerts/${alertId}/acknowledge`, {
         method: 'POST',
-        headers: {
-          Authorization: `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
+        headers: buildAuthJsonHeaders(token),
       });
 
       if (!res.ok) throw new Error('Failed to acknowledge alert.');
@@ -109,10 +117,7 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
     try {
       const res = await fetch(`${API_BASE_URL}/alerts/${alertId}/resolve`, {
         method: 'POST',
-        headers: {
-          Authorization: `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
+        headers: buildAuthJsonHeaders(token),
       });
 
       if (!res.ok) throw new Error('Failed to resolve alert.');
@@ -130,7 +135,7 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
     set({ isLoading: true, aiRecommendation: null });
     try {
       const res = await fetch(`${API_BASE_URL}/alerts/${alertId}/recommendation`, {
-        headers: { Authorization: `Bearer ${token}` },
+        headers: buildAuthHeaders(token),
       });
       if (!res.ok) throw new Error('Failed to retrieve AI recommendations.');
       const data = await res.json();
@@ -140,6 +145,11 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
     }
   },
 
+  /**
+   * Establishes the Socket.IO connection and registers event listeners for
+   * live density updates, new alerts, and alert resolutions.
+   * No-ops if a socket connection already exists.
+   */
   connectSocket: () => {
     const existingSocket = get().socket;
     if (existingSocket) return;
@@ -206,6 +216,10 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
     }
   },
 
+  /**
+   * Prepends a live-update announcement string to the announcements list.
+   * Keeps the list bounded to 20 items so it never grows unbounded.
+   */
   addAnnouncement: (text) => {
     set((state) => ({
       announcements: [text, ...state.announcements.slice(0, 19)], // Limit to last 20
