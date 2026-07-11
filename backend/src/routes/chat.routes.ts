@@ -10,19 +10,129 @@ import { rateLimiter } from '../middleware/rateLimit.middleware';
 const router = Router();
 
 /**
- * Normalizes a query string and returns its SHA-256 hash.
+ * Normalizes a query string and returns its SHA-256 hash for use as a cache key.
+ * Normalization: lowercased, trimmed, punctuation stripped, whitespace collapsed.
+ * @param query — raw user query text
+ * @param language — ISO 639-1 preferred language code (e.g. 'en', 'es')
+ * @returns 64-character hex SHA-256 digest
  */
 function computeQueryHash(query: string, language: string): string {
   const normalized = query
     .toLowerCase()
     .trim()
-    .replace(/[.,\/#!$%\^&\*;:{}=\-_`~()?¿¡]/g, '') // remove punctuation
+    .replace(/[.,\/#!$%\^\&\*;:{}=\-_`~()?¿¡]/g, '') // remove punctuation
     .replace(/\s+/g, ' '); // collapse spacing
-  
+
   return crypto
     .createHash('sha256')
     .update(`${normalized}_${language.toLowerCase()}`)
     .digest('hex');
+}
+
+/**
+ * Writes a `{ language, responseText }` pair to the Redis cache with a 24-hour TTL.
+ * Fail-safe: any Redis error is logged as a warning without propagating to the caller.
+ */
+async function writeToRedisCache(
+  key: string,
+  language: string,
+  responseText: string
+): Promise<void> {
+  try {
+    if (redisClient.isOpen) {
+      await redisClient.set(
+        key,
+        JSON.stringify({ language, responseText }),
+        { EX: 86400 }
+      );
+    }
+  } catch (err) {
+    console.warn('Redis write failed:', err);
+  }
+}
+
+/**
+ * Handles a Redis cache hit: parses the cached value, asynchronously increments the DB
+ * hit counter, creates a ChatQuery record marked as cached, and sends the 200 response.
+ * @returns true if the hit was processed and a response sent; false on parse error.
+ */
+async function handleRedisCacheHit(
+  cachedVal: string,
+  hash: string,
+  userId: string | undefined,
+  venueId: string,
+  queryText: string,
+  res: Response
+): Promise<boolean> {
+  try {
+    const { language: detectedLang, responseText: cachedResponseText } = JSON.parse(cachedVal);
+
+    // Update database hit count statistics asynchronously (non-blocking)
+    prisma.translationCache.updateMany({
+      where: { queryHash: hash },
+      data: { hitCount: { increment: 1 } },
+    }).catch((e) => console.error('Failed to increment DB hit count:', e));
+
+    const queryRecord = await prisma.chatQuery.create({
+      data: {
+        userId: userId || null,
+        venueId,
+        queryText,
+        detectedLanguage: detectedLang,
+        responseText: cachedResponseText,
+        wasCached: true,
+      },
+    });
+
+    res.status(200).json(queryRecord);
+    return true;
+  } catch (err) {
+    console.error('Failed to parse cached Redis value:', err);
+    return false;
+  }
+}
+
+/**
+ * Handles a PostgreSQL database cache hit: writes the result back to Redis (fail-safe),
+ * increments the synchronous hit counter, creates a ChatQuery record, and sends the response.
+ * @returns true if a DB cache entry was found and a response sent; false on cache miss.
+ */
+async function handleDbCacheHit(
+  redisCacheKey: string,
+  hash: string,
+  userId: string | undefined,
+  venueId: string,
+  queryText: string,
+  res: Response
+): Promise<boolean> {
+  const cachedResponse = await prisma.translationCache.findUnique({
+    where: { queryHash: hash },
+  });
+
+  if (!cachedResponse) return false;
+
+  // Write back to Redis so the next request is served from the faster cache tier
+  await writeToRedisCache(redisCacheKey, cachedResponse.language, cachedResponse.responseText);
+
+  // Update cache hit count (synchronous — the stat is used for cache eviction decisions)
+  await prisma.translationCache.update({
+    where: { id: cachedResponse.id },
+    data: { hitCount: { increment: 1 } },
+  });
+
+  const queryRecord = await prisma.chatQuery.create({
+    data: {
+      userId: userId || null,
+      venueId,
+      queryText,
+      detectedLanguage: cachedResponse.language,
+      responseText: cachedResponse.responseText,
+      wasCached: true,
+    },
+  });
+
+  res.status(200).json(queryRecord);
+  return true;
 }
 
 // POST /api/v1/chat/query - Submit user chat query (checks Redis cache first)
@@ -38,91 +148,27 @@ router.post('/query', rateLimiter, sanitizeInput, async (req: AuthenticatedReque
     const preferredLanguage = language || 'en';
     const hash = computeQueryHash(queryText, preferredLanguage);
     const redisCacheKey = `chat_cache:${hash}`;
-    let cachedVal: string | null = null;
+    let redisCachedValue: string | null = null;
 
     // 1. Try Redis cache first (fail-safe)
     try {
       if (redisClient.isOpen) {
-        cachedVal = await redisClient.get(redisCacheKey);
+        redisCachedValue = await redisClient.get(redisCacheKey);
       }
     } catch (err) {
       console.warn('Redis read failed, falling back to database:', err);
     }
 
-    if (cachedVal) {
-      try {
-        const { language: detectedLang, responseText: cachedResponseText } = JSON.parse(cachedVal);
-
-        // Update database hit count statistics asynchronously
-        prisma.translationCache.updateMany({
-          where: { queryHash: hash },
-          data: { hitCount: { increment: 1 } },
-        }).catch((e) => console.error('Failed to increment DB hit count:', e));
-
-        // Log the query execution with wasCached: true
-        const queryRecord = await prisma.chatQuery.create({
-          data: {
-            userId: userId || null,
-            venueId,
-            queryText,
-            detectedLanguage: detectedLang,
-            responseText: cachedResponseText,
-            wasCached: true,
-          },
-        });
-
-        res.status(200).json(queryRecord);
-        return;
-      } catch (err) {
-        console.error('Failed to parse cached Redis value:', err);
-      }
+    if (redisCachedValue) {
+      const handled = await handleRedisCacheHit(redisCachedValue, hash, userId, venueId, queryText, res);
+      if (handled) return;
     }
 
     // 2. Check PostgreSQL database cache next
-    const cachedResponse = await prisma.translationCache.findUnique({
-      where: { queryHash: hash },
-    });
+    const dbHandled = await handleDbCacheHit(redisCacheKey, hash, userId, venueId, queryText, res);
+    if (dbHandled) return;
 
-    if (cachedResponse) {
-      // Set in Redis for future hits (fail-safe, 24 hour TTL)
-      try {
-        if (redisClient.isOpen) {
-          await redisClient.set(
-            redisCacheKey,
-            JSON.stringify({
-              language: cachedResponse.language,
-              responseText: cachedResponse.responseText,
-            }),
-            { EX: 86400 }
-          );
-        }
-      } catch (err) {
-        console.warn('Redis write failed:', err);
-      }
-
-      // Update cache hit count
-      await prisma.translationCache.update({
-        where: { id: cachedResponse.id },
-        data: { hitCount: { increment: 1 } },
-      });
-
-      // Log the query execution with wasCached: true
-      const queryRecord = await prisma.chatQuery.create({
-        data: {
-          userId: userId || null,
-          venueId,
-          queryText,
-          detectedLanguage: cachedResponse.language,
-          responseText: cachedResponse.responseText,
-          wasCached: true,
-        },
-      });
-
-      res.status(200).json(queryRecord);
-      return;
-    }
-
-    // 3. Absolute cache miss: Call Gemini API
+    // 3. Absolute cache miss: call Gemini API
     const geminiResult = await askGemini(queryText);
 
     // Save translation in database cache for future hits
@@ -135,21 +181,8 @@ router.post('/query', rateLimiter, sanitizeInput, async (req: AuthenticatedReque
       },
     });
 
-    // Write-back to Redis cache (fail-safe, 24 hour TTL)
-    try {
-      if (redisClient.isOpen) {
-        await redisClient.set(
-          redisCacheKey,
-          JSON.stringify({
-            language: geminiResult.detectedLanguage,
-            responseText: geminiResult.responseText,
-          }),
-          { EX: 86400 }
-        );
-      }
-    } catch (err) {
-      console.warn('Redis write failed on cache miss:', err);
-    }
+    // Write-back to Redis cache (fail-safe, 24-hour TTL)
+    await writeToRedisCache(redisCacheKey, geminiResult.detectedLanguage, geminiResult.responseText);
 
     // Save chat query record with wasCached: false
     const queryRecord = await prisma.chatQuery.create({
