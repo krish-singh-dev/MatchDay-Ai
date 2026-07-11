@@ -5,7 +5,7 @@ dotenv.config();
 
 const apiKey = process.env.GEMINI_API_KEY;
 
-let aiClient: GoogleGenAI | null = null;
+let aiClient: any = null;
 if (apiKey) {
   aiClient = new GoogleGenAI({ apiKey });
 }
@@ -36,51 +36,25 @@ TONE:
 `;
 
 /**
- * Detects the language of a query using simple keyword matching.
- * Used only in the mock/stub path when no API key is configured.
- * Returns an ISO 639-1 language code ('en', 'es', or 'fr').
- */
-function detectMockLanguage(query: string): string {
-  const q = query.toLowerCase();
-  if (q.includes('¿dónde está') || q.includes('puerta')) return 'es';
-  if (q.includes('où est') || q.includes('porte')) return 'fr';
-  return 'en';
-}
-
-/**
- * Builds a hardcoded mock response string for the given language.
- * Used only in the mock/stub path when no API key is configured.
- */
-function buildMockResponseText(query: string, language: string): string {
-  if (language === 'es') {
-    return `Hola, soy el Asistente de MatchDay AI. La puerta que buscas está cruzando el pasillo principal.`;
-  }
-  if (language === 'fr') {
-    return `Bonjour, je suis l'assistant MatchDay AI. La porte se trouve après le hall principal.`;
-  }
-  return `I am the MatchDay AI Assistant. You asked: "${query}". We are currently operating in stub mode.`;
-}
-
-/**
- * Detects the language of a query for tagging live Gemini API responses.
- * Uses a broader regex set than the mock path to cover more natural-language variants.
- * Returns an ISO 639-1 language code ('en', 'es', or 'fr').
- */
-function detectQueryLanguage(query: string): string {
-  if (/¿|hola|puerta|dónde|gracias|está/i.test(query)) return 'es';
-  if (/bonjour|où|porte|merci/i.test(query)) return 'fr';
-  return 'en';
-}
-
-/**
  * Sends a query to the Gemini model with stadium assistant instructions.
  * This is the ONLY place GenAI queries are performed, satisfying the isolation requirement.
  */
 export async function askGemini(query: string): Promise<ChatResponse> {
   if (!aiClient) {
     console.warn('GEMINI_API_KEY is not defined. Using mock fallback response.');
-    const detectedLanguage = detectMockLanguage(query);
-    const responseText = buildMockResponseText(query, detectedLanguage);
+    
+    // Simple language detection stub for testing
+    let responseText = `I am the MatchDay AI Assistant. You asked: "${query}". We are currently operating in stub mode.`;
+    let detectedLanguage = 'en';
+
+    if (query.toLowerCase().includes('¿dónde está') || query.toLowerCase().includes('puerta')) {
+      responseText = `Hola, soy el Asistente de MatchDay AI. La puerta que buscas está cruzando el pasillo principal.`;
+      detectedLanguage = 'es';
+    } else if (query.toLowerCase().includes('où est') || query.toLowerCase().includes('porte')) {
+      responseText = `Bonjour, je suis l'assistant MatchDay AI. La porte se trouve après le hall principal.`;
+      detectedLanguage = 'fr';
+    }
+
     return { responseText, detectedLanguage };
   }
 
@@ -95,7 +69,16 @@ export async function askGemini(query: string): Promise<ChatResponse> {
     });
 
     const responseText = response.text || '';
-    const detectedLanguage = detectQueryLanguage(query);
+    
+    // We can run a quick language classification request or simple detection
+    // Here we'll do a simple regex check or rely on the prompt instructing the model to respond in the same language.
+    // If the model responded in Spanish, we mark it as 'es'. We can default to 'en' or do a basic detection.
+    let detectedLanguage = 'en';
+    if (/¿|hola|puerta|dónde|gracias|está/i.test(query)) {
+      detectedLanguage = 'es';
+    } else if (/bonjour|où|porte|merci/i.test(query)) {
+      detectedLanguage = 'fr';
+    }
 
     return {
       responseText: responseText.trim(),

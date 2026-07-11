@@ -7,40 +7,6 @@ import { rateLimiter } from '../middleware/rateLimit.middleware';
 
 const router = Router();
 
-/**
- * Creates a new density alert for a zone or escalates an existing one to a new severity.
- * Emits a socket event on any state change.
- */
-async function upsertDensityAlert(
-  zoneId: string,
-  severity: 'critical' | 'warning'
-): Promise<void> {
-  // Check if there is already an active (unresolved) alert for this zone
-  const existingAlert = await prisma.alert.findFirst({
-    where: { zoneId, resolvedAt: null },
-  });
-
-  if (!existingAlert) {
-    const alert = await prisma.alert.create({
-      data: {
-        zoneId,
-        severity,
-        aiRecommendation: 'Mitigation recommendation analysis pending. Request via operations console.',
-      },
-      include: { zone: true },
-    });
-    emitNewAlert(alert as any);
-  } else if (existingAlert.severity !== severity) {
-    // Escalate or de-escalate existing alert to the new severity level
-    const updatedAlert = await prisma.alert.update({
-      where: { id: existingAlert.id },
-      data: { severity },
-      include: { zone: true },
-    });
-    emitNewAlert(updatedAlert as any);
-  }
-}
-
 // POST /api/v1/density/ingest - Ingest a new density reading
 // Requires auth and staff/admin role
 router.post('/ingest', requireAuth, requireRole(['staff', 'admin']), rateLimiter, async (req: Request, res: Response): Promise<void> => {
@@ -73,22 +39,22 @@ router.post('/ingest', requireAuth, requireRole(['staff', 'admin']), rateLimiter
       return;
     }
 
-    // 2. Calculate density as a 0.0–1.0 ratio (stored as densityPct in DB)
-    const densityRatio = parseFloat((estimatedCount / zone.maxCapacity).toFixed(4));
-
+    // 2. Calculate density percentage
+    const densityPctValue = parseFloat((estimatedCount / zone.maxCapacity).toFixed(4));
+    
     // 3. Save the density reading
     const reading = await prisma.densityReading.create({
       data: {
         zoneId,
         estimatedCount,
-        densityPct: new Decimal(densityRatio),
+        densityPct: new Decimal(densityPctValue),
       },
     });
 
     // Cast Decimal to number for standard JSON output and socket updates
     const readingData = {
       ...reading,
-      densityPct: densityRatio,
+      densityPct: densityPctValue,
     };
 
     // Emit live density update event via Socket.IO
@@ -96,14 +62,46 @@ router.post('/ingest', requireAuth, requireRole(['staff', 'admin']), rateLimiter
 
     // 4. Threshold trigger checks
     let severity: 'critical' | 'warning' | null = null;
-    if (densityRatio >= 0.90) {
+    if (densityPctValue >= 0.90) {
       severity = 'critical';
-    } else if (densityRatio >= 0.70) {
+    } else if (densityPctValue >= 0.70) {
       severity = 'warning';
     }
 
     if (severity) {
-      await upsertDensityAlert(zoneId, severity);
+      // Check if there is already an active (unresolved) alert of the same severity for this zone
+      const existingAlert = await prisma.alert.findFirst({
+        where: {
+          zoneId,
+          resolvedAt: null,
+        },
+      });
+
+      if (!existingAlert) {
+        // Create new Alert
+        const alert = await prisma.alert.create({
+          data: {
+            zoneId,
+            severity,
+            aiRecommendation: 'Mitigation recommendation analysis pending. Request via operations console.',
+          },
+          include: {
+            zone: true,
+          },
+        });
+
+        // Emit live alert event via Socket.IO
+        emitNewAlert(alert as any);
+      } else if (existingAlert.severity !== severity) {
+        // Update existing alert severity
+        const updatedAlert = await prisma.alert.update({
+          where: { id: existingAlert.id },
+          data: { severity },
+          include: { zone: true },
+        });
+
+        emitNewAlert(updatedAlert as any);
+      }
     }
 
     res.status(201).json(readingData);
@@ -114,4 +112,3 @@ router.post('/ingest', requireAuth, requireRole(['staff', 'admin']), rateLimiter
 });
 
 export default router;
-

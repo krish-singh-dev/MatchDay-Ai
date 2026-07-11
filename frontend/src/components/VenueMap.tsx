@@ -1,34 +1,5 @@
 import { ZoneNode } from '../store/useNavigationStore';
 
-/** Visual style properties for a single zone node on the SVG map. */
-interface NodeStyle {
-  fill: string;
-  stroke: string;
-  size: number;
-}
-
-/**
- * Returns the SVG fill color, stroke color, and radius for a zone node
- * based on whether it is the route start, route end, an intermediate path node, or idle.
- */
-function getNodeStyle(
-  zone: ZoneNode,
-  startZoneId: string,
-  endZoneId: string,
-  activePath: string[]
-): NodeStyle {
-  if (zone.id === startZoneId) {
-    return { fill: 'var(--color-primary)', stroke: 'var(--color-primary-foreground)', size: 11 };
-  }
-  if (zone.id === endZoneId) {
-    return { fill: 'var(--color-secondary)', stroke: 'var(--color-secondary-foreground)', size: 11 };
-  }
-  if (activePath.includes(zone.id)) {
-    return { fill: 'var(--color-focus-ring)', stroke: 'var(--color-background)', size: 9 };
-  }
-  return { fill: 'var(--color-surface)', stroke: 'var(--color-border)', size: 8 };
-}
-
 interface VenueMapProps {
   zones: ZoneNode[];
   activePath: string[];
@@ -163,12 +134,25 @@ export default function VenueMap({
           {zones.map((zone) => {
             const isStart = zone.id === startZoneId;
             const isEnd = zone.id === endZoneId;
-            const { fill: nodeFill, stroke: nodeStroke, size: nodeSize } = getNodeStyle(
-              zone,
-              startZoneId,
-              endZoneId,
-              activePath
-            );
+            const isPathNode = activePath.includes(zone.id);
+
+            let nodeFill = 'var(--color-surface)';
+            let nodeStroke = 'var(--color-border)';
+            let nodeSize = 8;
+
+            if (isStart) {
+              nodeFill = 'var(--color-primary)';
+              nodeStroke = 'var(--color-primary-foreground)';
+              nodeSize = 11;
+            } else if (isEnd) {
+              nodeFill = 'var(--color-secondary)';
+              nodeStroke = 'var(--color-secondary-foreground)';
+              nodeSize = 11;
+            } else if (isPathNode) {
+              nodeFill = 'var(--color-focus-ring)';
+              nodeStroke = 'var(--color-background)';
+              nodeSize = 9;
+            }
 
             return (
               <g key={zone.id}>

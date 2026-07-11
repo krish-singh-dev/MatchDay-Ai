@@ -3,404 +3,7 @@ import { Shield, AlertTriangle, Languages, Users, Loader2, Navigation, RefreshCw
 import { useChatStore } from './store/useChatStore';
 import { useNavigationStore } from './store/useNavigationStore';
 import { useDashboardStore } from './store/useDashboardStore';
-import type { DashboardZone, DashboardAlert } from './store/useDashboardStore';
-import type { Message } from './store/useChatStore';
-import type { ZoneNode, CalculatedRoute } from './store/useNavigationStore';
 import VenueMap from './components/VenueMap';
-
-// ---------------------------------------------------------------------------
-// Utility helpers
-// ---------------------------------------------------------------------------
-
-/**
- * Returns Tailwind badge color classes and a label string for a given density ratio (0.0–1.0).
- */
-function getDensityBadge(densityPct: number): { color: string; label: string } {
-  if (densityPct >= 0.90) return { color: 'bg-critical text-critical-foreground', label: 'Critical' };
-  if (densityPct >= 0.70) return { color: 'bg-warning text-warning-foreground', label: 'Warning' };
-  return { color: 'bg-secondary text-secondary-foreground', label: 'Low' };
-}
-
-// ---------------------------------------------------------------------------
-// Sub-components (defined before App to keep the main component concise)
-// ---------------------------------------------------------------------------
-
-interface ChatTabContentProps {
-  messages: Message[];
-  isChatLoading: boolean;
-  preferredLanguage: string;
-}
-
-/** Renders the scrollable chat message list and the typing-indicator skeleton. */
-function ChatTabContent({ messages, isChatLoading, preferredLanguage }: ChatTabContentProps) {
-  return (
-    <div>
-      <p className="text-text-secondary text-sm mb-4">
-        Ask questions in your preferred language about gates, concessions, exits, or restrooms.
-      </p>
-
-      {/* Chat Messages */}
-      <div
-        className="space-y-4 h-[350px] overflow-y-auto bg-background rounded-md p-4 border border-border flex flex-col"
-        aria-live="polite"
-      >
-        {messages.length === 0 ? (
-          <div className="flex-1 flex items-center justify-center text-text-secondary text-xs">
-            Ask a question to start the conversation
-          </div>
-        ) : (
-          messages.map((msg) => (
-            <div
-              key={msg.id}
-              className={`flex flex-col max-w-[80%] ${
-                msg.sender === 'user' ? 'self-end items-end' : 'self-start items-start'
-              }`}
-            >
-              {/* Language indicator headers above bot responses */}
-              {msg.sender === 'bot' && (
-                <span className="text-[10px] text-text-secondary mb-1 uppercase font-semibold">
-                  Detected Source: {msg.detectedLanguage || 'EN'} | Response: {preferredLanguage.toUpperCase()}
-                  {msg.wasCached && <span className="text-secondary ml-1.5">(Cached)</span>}
-                </span>
-              )}
-
-              <div
-                className={`rounded-lg px-4 py-2 text-sm ${
-                  msg.sender === 'user'
-                    ? 'bg-primary text-primary-foreground'
-                    : 'bg-surface border border-border text-text-primary'
-                }`}
-              >
-                {msg.text}
-              </div>
-            </div>
-          ))
-        )}
-
-        {/* Loading / Typing State */}
-        {isChatLoading && (
-          <div className="self-start flex flex-col items-start max-w-[80%]">
-            <span className="text-[10px] text-text-secondary mb-1 uppercase font-semibold">
-              Assistant is typing...
-            </span>
-            <div className="bg-surface border border-border rounded-lg px-4 py-2 text-sm text-text-secondary flex items-center space-x-2">
-              <Loader2 className="w-4 h-4 animate-spin text-primary" />
-              <span>Thinking...</span>
-            </div>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-interface MapTabContentProps {
-  mapZones: ZoneNode[];
-  startZoneId: string;
-  endZoneId: string;
-  route: CalculatedRoute | null;
-  isRouteLoading: boolean;
-  onStartZoneChange: (id: string) => void;
-  onEndZoneChange: (id: string) => void;
-  onCalculateRoute: (e: React.FormEvent) => void;
-  onClearRoute: () => void;
-}
-
-/** Renders the zone-selection dropdowns, the SVG venue map, and the step-by-step directions. */
-function MapTabContent({
-  mapZones,
-  startZoneId,
-  endZoneId,
-  route,
-  isRouteLoading,
-  onStartZoneChange,
-  onEndZoneChange,
-  onCalculateRoute,
-  onClearRoute,
-}: MapTabContentProps) {
-  return (
-    <div className="space-y-4">
-      <p className="text-text-secondary text-sm">
-        Select your current location and desired destination to map the route.
-      </p>
-
-      {/* Dropdowns */}
-      <form onSubmit={onCalculateRoute} className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <div>
-          <label htmlFor="start-zone" className="block text-xs font-semibold text-text-secondary mb-1">
-            START LOCATION
-          </label>
-          <select
-            id="start-zone"
-            value={startZoneId}
-            onChange={(e) => onStartZoneChange(e.target.value)}
-            className="w-full bg-background border border-border rounded-md px-3 py-1.5 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-focusRing"
-          >
-            <option value="">Choose start...</option>
-            {mapZones.map((zone) => (
-              <option key={`start-${zone.id}`} value={zone.id}>
-                {zone.name}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        <div>
-          <label htmlFor="end-zone" className="block text-xs font-semibold text-text-secondary mb-1">
-            DESTINATION
-          </label>
-          <select
-            id="end-zone"
-            value={endZoneId}
-            onChange={(e) => onEndZoneChange(e.target.value)}
-            className="w-full bg-background border border-border rounded-md px-3 py-1.5 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-focusRing"
-          >
-            <option value="">Choose destination...</option>
-            {mapZones.map((zone) => (
-              <option key={`end-${zone.id}`} value={zone.id}>
-                {zone.name}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        <div className="sm:col-span-2 flex space-x-2">
-          <button
-            type="submit"
-            disabled={!startZoneId || !endZoneId || isRouteLoading}
-            className="flex-1 bg-primary text-primary-foreground py-2 rounded-md text-sm font-semibold hover:bg-opacity-90 transition disabled:opacity-50 flex items-center justify-center space-x-1.5"
-          >
-            {isRouteLoading && <Loader2 className="w-4 h-4 animate-spin" />}
-            <span>Calculate Route</span>
-          </button>
-
-          {route && (
-            <button
-              type="button"
-              onClick={onClearRoute}
-              className="bg-surface border border-border px-3 rounded-md text-sm text-text-secondary hover:text-text-primary flex items-center"
-              aria-label="Clear calculated route"
-            >
-              <RefreshCw className="w-4 h-4" />
-            </button>
-          )}
-        </div>
-      </form>
-
-      {/* Custom Map View */}
-      <VenueMap
-        zones={mapZones}
-        activePath={route?.path || []}
-        coordinates={route?.coordinates || []}
-        startZoneId={startZoneId}
-        endZoneId={endZoneId}
-      />
-
-      {/* Step-by-Step Directions Text */}
-      {route && (
-        <div className="bg-background border border-border rounded-md p-4">
-          <h3 className="text-xs font-bold text-text-primary mb-2 uppercase tracking-wide">
-            Directions Guide
-          </h3>
-          <ol className="list-decimal pl-4 text-xs text-text-secondary space-y-1.5">
-            {route.directions.map((dir, idx) => (
-              <li key={`dir-${idx}`}>{dir}</li>
-            ))}
-          </ol>
-        </div>
-      )}
-    </div>
-  );
-}
-
-interface ZonesGridProps {
-  zones: DashboardZone[];
-}
-
-/** Renders the real-time zone capacity level cards in the staff dashboard. */
-function ZonesGrid({ zones }: ZonesGridProps) {
-  return (
-    <div className="space-y-3 max-h-[220px] overflow-y-auto pr-1 mb-6">
-      <h3 className="text-xs font-semibold text-text-primary mb-2 uppercase tracking-wide">Zone Capacity Levels</h3>
-      {zones.length === 0 ? (
-        <div className="text-center text-xs text-text-secondary py-4 bg-background rounded border border-border">
-          No zones registered
-        </div>
-      ) : (
-        zones.map((z) => {
-          const { color: badgeColor, label } = getDensityBadge(z.densityPct);
-          const pctText = Math.round(z.densityPct * 100);
-
-          return (
-            <div key={z.id} className="bg-background border border-border rounded-md p-3 flex items-center justify-between">
-              <div className="flex items-center space-x-3">
-                <span className="text-sm font-medium">{z.name}</span>
-              </div>
-              <div className="flex items-center space-x-2">
-                <span className="text-xs text-text-secondary">{z.estimatedCount}/{z.maxCapacity} fans</span>
-                <span className={`text-[10px] px-2 py-0.5 rounded font-semibold ${badgeColor}`}>
-                  {label} ({pctText}%)
-                </span>
-              </div>
-            </div>
-          );
-        })
-      )}
-    </div>
-  );
-}
-
-interface AlertsListProps {
-  alerts: DashboardAlert[];
-  onAcknowledge: (alertId: string) => void;
-  onViewRecommendation: (alertId: string) => void;
-  onResolve: (alertId: string) => void;
-}
-
-/** Renders the list of active safety alerts with acknowledge, AI plan, and resolve actions. */
-function AlertsList({ alerts, onAcknowledge, onViewRecommendation, onResolve }: AlertsListProps) {
-  return (
-    <div className="border-t border-border pt-4">
-      <h3 className="text-xs font-bold text-text-primary mb-2 uppercase tracking-wide flex items-center">
-        <AlertTriangle className="w-4 h-4 text-warning mr-1.5" />
-        Active Safety Alerts
-      </h3>
-
-      <div className="space-y-3 max-h-[220px] overflow-y-auto pr-1">
-        {alerts.length === 0 ? (
-          <div className="text-center text-xs text-text-secondary py-4 bg-background rounded border border-border">
-            No active crowd-density alerts. System normal.
-          </div>
-        ) : (
-          alerts.map((alert) => {
-            const isCritical = alert.severity === 'critical';
-            return (
-              <div
-                key={alert.id}
-                className={`border rounded-md p-3 flex flex-col justify-between ${
-                  isCritical
-                    ? 'bg-critical bg-opacity-10 border-critical'
-                    : 'bg-warning bg-opacity-10 border-warning'
-                }`}
-              >
-                <div className="flex items-center justify-between mb-2">
-                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded uppercase ${
-                    isCritical ? 'bg-critical text-critical-foreground' : 'bg-warning text-warning-foreground'
-                  }`}>
-                    {alert.severity}
-                  </span>
-                  <span className="text-[10px] text-text-secondary">
-                    Triggered: {new Date(alert.createdAt).toLocaleTimeString()}
-                  </span>
-                </div>
-
-                <p className="text-xs text-text-primary font-medium mb-3">
-                  Crowd spike at {alert.zone?.name || 'stadium zone'}. Capacity limits exceeded.
-                </p>
-
-                <div className="flex space-x-2">
-                  {/* Acknowledge Action */}
-                  {!alert.acknowledgedBy ? (
-                    <button
-                      type="button"
-                      onClick={() => onAcknowledge(alert.id)}
-                      className="flex-1 bg-surface border border-border hover:bg-opacity-80 text-text-primary text-[10px] font-semibold py-1.5 rounded flex items-center justify-center space-x-1"
-                      aria-label="Acknowledge alert"
-                    >
-                      <span>Acknowledge</span>
-                    </button>
-                  ) : (
-                    <div className="flex-1 bg-surface border border-border text-secondary text-[10px] font-semibold py-1.5 rounded flex items-center justify-center space-x-1 opacity-75">
-                      <CheckCircle className="w-3 h-3" />
-                      <span>Acknowledged</span>
-                    </div>
-                  )}
-
-                  {/* View AI Mitigation recommendation */}
-                  <button
-                    type="button"
-                    onClick={() => onViewRecommendation(alert.id)}
-                    className="flex-1 bg-primary text-primary-foreground hover:bg-opacity-95 text-[10px] font-semibold py-1.5 rounded flex items-center justify-center space-x-1"
-                    aria-label="View AI mitigation recommendation"
-                  >
-                    <Eye className="w-3 h-3" />
-                    <span>AI Action Plan</span>
-                  </button>
-
-                  {/* Resolve Action */}
-                  <button
-                    type="button"
-                    onClick={() => onResolve(alert.id)}
-                    className="bg-secondary text-secondary-foreground hover:bg-opacity-95 text-[10px] font-semibold px-2 py-1.5 rounded"
-                    aria-label="Mark alert resolved"
-                  >
-                    Resolve
-                  </button>
-                </div>
-              </div>
-            );
-          })
-        )}
-      </div>
-    </div>
-  );
-}
-
-interface RecommendationModalProps {
-  aiRecommendation: string | null;
-  isDashboardLoading: boolean;
-  onClose: () => void;
-}
-
-/** Full-screen modal overlay that displays the AI-generated crowd mitigation recommendation. */
-function RecommendationModal({ aiRecommendation, isDashboardLoading, onClose }: RecommendationModalProps) {
-  return (
-    <div
-      className="fixed inset-0 bg-background bg-opacity-80 flex items-center justify-center p-4 z-50 animate-fade-in"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="modal-heading"
-    >
-      <div className="bg-surface border border-border rounded-lg p-6 max-w-md w-full shadow-2xl">
-        <div className="flex items-center justify-between border-b border-border pb-3 mb-4">
-          <h3 id="modal-heading" className="font-display font-semibold text-base text-primary-foreground flex items-center">
-            <Volume2 className="w-5 h-5 mr-2 text-primary" />
-            AI Mitigation Recommendation
-          </h3>
-          <button
-            type="button"
-            onClick={onClose}
-            className="text-text-secondary hover:text-text-primary text-xs font-semibold px-2 py-1 border border-border rounded"
-            aria-label="Close recommendation modal"
-          >
-            Close
-          </button>
-        </div>
-
-        {isDashboardLoading && !aiRecommendation ? (
-          <div className="flex flex-col items-center justify-center py-10 space-y-3">
-            <Loader2 className="w-8 h-8 animate-spin text-primary" />
-            <span className="text-xs text-text-secondary">Generating Crowd Action Plan...</span>
-          </div>
-        ) : (
-          <div className="space-y-4">
-            <div className="bg-background rounded border border-border p-4 text-xs text-text-primary leading-relaxed whitespace-pre-line">
-              {aiRecommendation || 'No recommendation received.'}
-            </div>
-            <p className="text-[10px] text-text-secondary italic">
-              Recommendations generated dynamically using Gemini based on live surrounding zone capacities.
-            </p>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Main App component
-// ---------------------------------------------------------------------------
-
 
 export default function App() {
   const {
@@ -444,7 +47,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<'chat' | 'map'>('chat');
   const [inputText, setInputText] = useState('');
   const [staffToken, setStaffToken] = useState<string | null>(null);
-  const [recommendationModalAlertId, setRecommendationModalAlertId] = useState<string | null>(null);
+  const [activeAlertIdForModal, setActiveAlertIdForModal] = useState<string | null>(null);
 
   // Matches seeded UUID in Postgres database
   const mockVenueId = '00000000-0000-0000-0000-000000000000';
@@ -510,7 +113,7 @@ export default function App() {
 
   const handleViewRecommendation = async (alertId: string) => {
     if (!staffToken) return;
-    setRecommendationModalAlertId(alertId);
+    setActiveAlertIdForModal(alertId);
     await fetchRecommendation(alertId, staffToken);
   };
 
@@ -522,11 +125,6 @@ export default function App() {
   const handleResolve = async (alertId: string) => {
     if (!staffToken) return;
     await resolveAlert(alertId, staffToken);
-  };
-
-  const handleCloseModal = () => {
-    setRecommendationModalAlertId(null);
-    clearRecommendation();
   };
 
   return (
@@ -610,26 +208,158 @@ export default function App() {
 
               {/* Chat Tab Panel */}
               {activeTab === 'chat' && (
-                <ChatTabContent
-                  messages={messages}
-                  isChatLoading={isChatLoading}
-                  preferredLanguage={preferredLanguage}
-                />
+                <div>
+                  <p className="text-text-secondary text-sm mb-4">
+                    Ask questions in your preferred language about gates, concessions, exits, or restrooms.
+                  </p>
+                  
+                  {/* Chat Messages */}
+                  <div 
+                    className="space-y-4 h-[350px] overflow-y-auto bg-background rounded-md p-4 border border-border flex flex-col"
+                    aria-live="polite"
+                  >
+                    {messages.length === 0 ? (
+                      <div className="flex-1 flex items-center justify-center text-text-secondary text-xs">
+                        Ask a question to start the conversation
+                      </div>
+                    ) : (
+                      messages.map((msg) => (
+                        <div
+                          key={msg.id}
+                          className={`flex flex-col max-w-[80%] ${
+                            msg.sender === 'user' ? 'self-end items-end' : 'self-start items-start'
+                          }`}
+                        >
+                          {/* Language indicator headers above bot responses */}
+                          {msg.sender === 'bot' && (
+                            <span className="text-[10px] text-text-secondary mb-1 uppercase font-semibold">
+                              Detected Source: {msg.detectedLanguage || 'EN'} | Response: {preferredLanguage.toUpperCase()}
+                              {msg.wasCached && <span className="text-secondary ml-1.5">(Cached)</span>}
+                            </span>
+                          )}
+                          
+                          <div
+                            className={`rounded-lg px-4 py-2 text-sm ${
+                              msg.sender === 'user'
+                                ? 'bg-primary text-primary-foreground'
+                                : 'bg-surface border border-border text-text-primary'
+                            }`}
+                          >
+                            {msg.text}
+                          </div>
+                        </div>
+                      ))
+                    )}
+
+                    {/* Loading / Typing State */}
+                    {isChatLoading && (
+                      <div className="self-start flex flex-col items-start max-w-[80%]">
+                        <span className="text-[10px] text-text-secondary mb-1 uppercase font-semibold">
+                          Assistant is typing...
+                        </span>
+                        <div className="bg-surface border border-border rounded-lg px-4 py-2 text-sm text-text-secondary flex items-center space-x-2">
+                          <Loader2 className="w-4 h-4 animate-spin text-primary" />
+                          <span>Thinking...</span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
               )}
 
               {/* Wayfinding Map Tab Panel */}
               {activeTab === 'map' && (
-                <MapTabContent
-                  mapZones={mapZones}
-                  startZoneId={startZoneId}
-                  endZoneId={endZoneId}
-                  route={route}
-                  isRouteLoading={isRouteLoading}
-                  onStartZoneChange={setStartZoneId}
-                  onEndZoneChange={setEndZoneId}
-                  onCalculateRoute={handleCalculateRoute}
-                  onClearRoute={clearRoute}
-                />
+                <div className="space-y-4">
+                  <p className="text-text-secondary text-sm">
+                    Select your current location and desired destination to map the route.
+                  </p>
+
+                  {/* Dropdowns */}
+                  <form onSubmit={handleCalculateRoute} className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label htmlFor="start-zone" className="block text-xs font-semibold text-text-secondary mb-1">
+                        START LOCATION
+                      </label>
+                      <select
+                        id="start-zone"
+                        value={startZoneId}
+                        onChange={(e) => setStartZoneId(e.target.value)}
+                        className="w-full bg-background border border-border rounded-md px-3 py-1.5 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-focusRing"
+                      >
+                        <option value="">Choose start...</option>
+                        {mapZones.map((zone) => (
+                          <option key={`start-${zone.id}`} value={zone.id}>
+                            {zone.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div>
+                      <label htmlFor="end-zone" className="block text-xs font-semibold text-text-secondary mb-1">
+                        DESTINATION
+                      </label>
+                      <select
+                        id="end-zone"
+                        value={endZoneId}
+                        onChange={(e) => setEndZoneId(e.target.value)}
+                        className="w-full bg-background border border-border rounded-md px-3 py-1.5 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-focusRing"
+                      >
+                        <option value="">Choose destination...</option>
+                        {mapZones.map((zone) => (
+                          <option key={`end-${zone.id}`} value={zone.id}>
+                            {zone.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div className="sm:col-span-2 flex space-x-2">
+                      <button
+                        type="submit"
+                        disabled={!startZoneId || !endZoneId || isRouteLoading}
+                        className="flex-1 bg-primary text-primary-foreground py-2 rounded-md text-sm font-semibold hover:bg-opacity-90 transition disabled:opacity-50 flex items-center justify-center space-x-1.5"
+                      >
+                        {isRouteLoading && <Loader2 className="w-4 h-4 animate-spin" />}
+                        <span>Calculate Route</span>
+                      </button>
+
+                      {route && (
+                        <button
+                          type="button"
+                          onClick={clearRoute}
+                          className="bg-surface border border-border px-3 rounded-md text-sm text-text-secondary hover:text-text-primary flex items-center"
+                          aria-label="Clear calculated route"
+                        >
+                          <RefreshCw className="w-4 h-4" />
+                        </button>
+                      )}
+                    </div>
+                  </form>
+
+                  {/* Custom Map View */}
+                  <VenueMap
+                    zones={mapZones}
+                    activePath={route?.path || []}
+                    coordinates={route?.coordinates || []}
+                    startZoneId={startZoneId}
+                    endZoneId={endZoneId}
+                  />
+
+                  {/* Step-by-Step Directions Text */}
+                  {route && (
+                    <div className="bg-background border border-border rounded-md p-4">
+                      <h3 className="text-xs font-bold text-text-primary mb-2 uppercase tracking-wide">
+                        Directions Guide
+                      </h3>
+                      <ol className="list-decimal pl-4 text-xs text-text-secondary space-y-1.5">
+                        {route.directions.map((dir, idx) => (
+                          <li key={`dir-${idx}`}>{dir}</li>
+                        ))}
+                      </ol>
+                    </div>
+                  )}
+                </div>
               )}
             </div>
 
@@ -703,15 +433,128 @@ export default function App() {
             </p>
 
             {/* Zones Grid */}
-            <ZonesGrid zones={dashboardZones} />
+            <div className="space-y-3 max-h-[220px] overflow-y-auto pr-1 mb-6">
+              <h3 className="text-xs font-semibold text-text-primary mb-2 uppercase tracking-wide">Zone Capacity Levels</h3>
+              {dashboardZones.length === 0 ? (
+                <div className="text-center text-xs text-text-secondary py-4 bg-background rounded border border-border">
+                  No zones registered
+                </div>
+              ) : (
+                dashboardZones.map((z) => {
+                  let badgeColor = 'bg-secondary text-secondary-foreground';
+                  let label = 'Low';
+                  
+                  if (z.densityPct >= 0.90) {
+                    badgeColor = 'bg-critical text-critical-foreground';
+                    label = 'Critical';
+                  } else if (z.densityPct >= 0.70) {
+                    badgeColor = 'bg-warning text-warning-foreground';
+                    label = 'Warning';
+                  }
+
+                  const pctText = Math.round(z.densityPct * 100);
+
+                  return (
+                    <div key={z.id} className="bg-background border border-border rounded-md p-3 flex items-center justify-between">
+                      <div className="flex items-center space-x-3">
+                        <span className="text-sm font-medium">{z.name}</span>
+                      </div>
+                      <div className="flex items-center space-x-2">
+                        <span className="text-xs text-text-secondary">{z.estimatedCount}/{z.maxCapacity} fans</span>
+                        <span className={`text-[10px] px-2 py-0.5 rounded font-semibold ${badgeColor}`}>
+                          {label} ({pctText}%)
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
 
             {/* Active Alerts List */}
-            <AlertsList
-              alerts={activeAlerts}
-              onAcknowledge={handleAcknowledge}
-              onViewRecommendation={handleViewRecommendation}
-              onResolve={handleResolve}
-            />
+            <div className="border-t border-border pt-4">
+              <h3 className="text-xs font-bold text-text-primary mb-2 uppercase tracking-wide flex items-center">
+                <AlertTriangle className="w-4 h-4 text-warning mr-1.5" />
+                Active Safety Alerts
+              </h3>
+              
+              <div className="space-y-3 max-h-[220px] overflow-y-auto pr-1">
+                {activeAlerts.length === 0 ? (
+                  <div className="text-center text-xs text-text-secondary py-4 bg-background rounded border border-border">
+                    No active crowd-density alerts. System normal.
+                  </div>
+                ) : (
+                  activeAlerts.map((alert) => {
+                    const isCritical = alert.severity === 'critical';
+                    return (
+                      <div 
+                        key={alert.id} 
+                        className={`border rounded-md p-3 flex flex-col justify-between ${
+                          isCritical 
+                            ? 'bg-critical bg-opacity-10 border-critical' 
+                            : 'bg-warning bg-opacity-10 border-warning'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between mb-2">
+                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded uppercase ${
+                            isCritical ? 'bg-critical text-critical-foreground' : 'bg-warning text-warning-foreground'
+                          }`}>
+                            {alert.severity}
+                          </span>
+                          <span className="text-[10px] text-text-secondary">
+                            Triggered: {new Date(alert.createdAt).toLocaleTimeString()}
+                          </span>
+                        </div>
+
+                        <p className="text-xs text-text-primary font-medium mb-3">
+                          Crowd spike at {alert.zone?.name || 'stadium zone'}. Capacity limits exceeded.
+                        </p>
+
+                        <div className="flex space-x-2">
+                          {/* Acknowledge Action */}
+                          {!alert.acknowledgedBy ? (
+                            <button
+                              type="button"
+                              onClick={() => handleAcknowledge(alert.id)}
+                              className="flex-1 bg-surface border border-border hover:bg-opacity-80 text-text-primary text-[10px] font-semibold py-1.5 rounded flex items-center justify-center space-x-1"
+                              aria-label="Acknowledge alert"
+                            >
+                              <span>Acknowledge</span>
+                            </button>
+                          ) : (
+                            <div className="flex-1 bg-surface border border-border text-secondary text-[10px] font-semibold py-1.5 rounded flex items-center justify-center space-x-1 opacity-75">
+                              <CheckCircle className="w-3 h-3" />
+                              <span>Acknowledged</span>
+                            </div>
+                          )}
+
+                          {/* View AI Mitigation recommendation */}
+                          <button
+                            type="button"
+                            onClick={() => handleViewRecommendation(alert.id)}
+                            className="flex-1 bg-primary text-primary-foreground hover:bg-opacity-95 text-[10px] font-semibold py-1.5 rounded flex items-center justify-center space-x-1"
+                            aria-label="View AI mitigation recommendation"
+                          >
+                            <Eye className="w-3 h-3" />
+                            <span>AI Action Plan</span>
+                          </button>
+
+                          {/* Resolve Action */}
+                          <button
+                            type="button"
+                            onClick={() => handleResolve(alert.id)}
+                            className="bg-secondary text-secondary-foreground hover:bg-opacity-95 text-[10px] font-semibold px-2 py-1.5 rounded"
+                            aria-label="Mark alert resolved"
+                          >
+                            Resolve
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </div>
           </div>
           
           {/* Socket status indicator */}
@@ -723,12 +566,49 @@ export default function App() {
       </main>
 
       {/* AI Mitigation Recommendation Modal Dialog Overlay */}
-      {recommendationModalAlertId && (
-        <RecommendationModal
-          aiRecommendation={aiRecommendation}
-          isDashboardLoading={isDashboardLoading}
-          onClose={handleCloseModal}
-        />
+      {activeAlertIdForModal && (
+        <div 
+          className="fixed inset-0 bg-background bg-opacity-80 flex items-center justify-center p-4 z-50 animate-fade-in"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="modal-heading"
+        >
+          <div className="bg-surface border border-border rounded-lg p-6 max-w-md w-full shadow-2xl">
+            <div className="flex items-center justify-between border-b border-border pb-3 mb-4">
+              <h3 id="modal-heading" className="font-display font-semibold text-base text-primary-foreground flex items-center">
+                <Volume2 className="w-5 h-5 mr-2 text-primary" />
+                AI Mitigation Recommendation
+              </h3>
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveAlertIdForModal(null);
+                  clearRecommendation();
+                }}
+                className="text-text-secondary hover:text-text-primary text-xs font-semibold px-2 py-1 border border-border rounded"
+                aria-label="Close recommendation modal"
+              >
+                Close
+              </button>
+            </div>
+
+            {isDashboardLoading && !aiRecommendation ? (
+              <div className="flex flex-col items-center justify-center py-10 space-y-3">
+                <Loader2 className="w-8 h-8 animate-spin text-primary" />
+                <span className="text-xs text-text-secondary">Generating Crowd Action Plan...</span>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                <div className="bg-background rounded border border-border p-4 text-xs text-text-primary leading-relaxed whitespace-pre-line">
+                  {aiRecommendation || 'No recommendation received.'}
+                </div>
+                <p className="text-[10px] text-text-secondary italic">
+                  Recommendations generated dynamically using Gemini based on live surrounding zone capacities.
+                </p>
+              </div>
+            )}
+          </div>
+        </div>
       )}
 
       {/* Footer */}

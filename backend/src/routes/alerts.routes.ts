@@ -6,55 +6,6 @@ import { emitAlertResolved } from '../socket/events';
 
 const router = Router();
 
-/**
- * Builds a formatted text block listing adjacent zones and their current density stats.
- * Used as context in the AI rerouting prompt.
- */
-function buildAdjacentZoneStatsText(
-  otherZones: Array<{
-    name: string;
-    zoneType: string;
-    maxCapacity: number;
-    densityReadings: Array<{ estimatedCount: number; densityPct: any }>;
-  }>
-): string {
-  let statsText = '';
-  otherZones.forEach((z) => {
-    const reading = z.densityReadings[0];
-    const pct = reading ? Math.round(parseFloat(reading.densityPct.toString()) * 100) : 0;
-    statsText += `- "${z.name}" (${z.zoneType}): currently at ${pct}% capacity (${reading?.estimatedCount || 0}/${z.maxCapacity} fans)\n`;
-  });
-  return statsText;
-}
-
-/**
- * Builds the Gemini prompt for a crowd-rerouting mitigation recommendation.
- * @param alertZone - The zone experiencing the density spike.
- * @param severity - Alert severity level.
- * @param targetPct - Current occupancy percentage of the alert zone (0–100).
- * @param targetCount - Current estimated fan count in the alert zone.
- * @param adjacentStatsText - Pre-formatted stats string for alternative zones.
- */
-function buildReroutingPrompt(
-  alertZone: { name: string; zoneType: string; maxCapacity: number },
-  severity: string,
-  targetPct: number,
-  targetCount: number,
-  adjacentStatsText: string
-): string {
-  return `
-Generate a concise, actionable crowd capacity mitigation plan.
-The target zone "${alertZone.name}" (${alertZone.zoneType}) is experiencing a ${severity} density spike, currently at ${targetPct}% capacity (${targetCount}/${alertZone.maxCapacity} fans).
-
-Alternative available stadium zones:
-${adjacentStatsText}
-Provide:
-1. Short justification of the situation.
-2. Clear, numbered rerouting instructions for venue staff and volunteers to redirect traffic away from "${alertZone.name}" to the lowest density alternative zones.
-Keep it under 150 words.
-`;
-}
-
 // Apply auth and staff/admin role gate to all alert endpoints
 router.use(requireAuth, requireRole(['staff', 'admin']));
 
@@ -156,6 +107,9 @@ router.get('/:alertId/recommendation', async (req: AuthenticatedRequest, res: Re
       return;
     }
 
+    // If recommendation has already been custom generated, we can check.
+    // For v1 operations, we compile dynamic crowd statistics and call Gemini on-demand to fetch fresh mitigation plans.
+    
     // 2. Fetch latest density reading for the alert zone
     const targetReading = await prisma.densityReading.findFirst({
       where: { zoneId: alert.zoneId },
@@ -179,15 +133,26 @@ router.get('/:alertId/recommendation', async (req: AuthenticatedRequest, res: Re
       },
     });
 
-    // 4. Compile adjacent zone stats and formulate the operational prompt
-    const adjacentStatsText = buildAdjacentZoneStatsText(otherZones);
-    const recommendationPrompt = buildReroutingPrompt(
-      alert.zone,
-      alert.severity,
-      targetPct,
-      targetCount,
-      adjacentStatsText
-    );
+    let adjacentStatsText = '';
+    otherZones.forEach((z) => {
+      const reading = z.densityReadings[0];
+      const pct = reading ? Math.round(parseFloat(reading.densityPct.toString()) * 100) : 0;
+      adjacentStatsText += `- "${z.name}" (${z.zoneType}): currently at ${pct}% capacity (${reading?.estimatedCount || 0}/${z.maxCapacity} fans)\n`;
+    });
+
+    // 4. Formulate the operational prompt
+    const recommendationPrompt = `
+Generate a concise, actionable crowd capacity mitigation plan.
+The target zone "${alert.zone.name}" (${alert.zone.zoneType}) is experiencing a ${alert.severity} density spike, currently at ${targetPct}% capacity (${targetCount}/${alert.zone.maxCapacity} fans).
+
+Alternative available stadium zones:
+${adjacentStatsText}
+
+Provide:
+1. Short justification of the situation.
+2. Clear, numbered rerouting instructions for venue staff and volunteers to redirect traffic away from "${alert.zone.name}" to the lowest density alternative zones.
+Keep it under 150 words.
+`;
 
     // 5. Query Gemini
     const geminiResult = await askGemini(recommendationPrompt);

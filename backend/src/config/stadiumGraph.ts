@@ -44,21 +44,20 @@ export const STADIUM_EDGES: GraphEdge[] = [
   { from: ZONES.CONCOURSE_SOUTH, to: ZONES.CONCESSIONS, directions: 'Head north-east along the outer ring for 80m.' },
 ];
 
-// ---------------------------------------------------------------------------
-// Private helpers — split out of findRoute to reduce function complexity
-// ---------------------------------------------------------------------------
-
-interface AdjacencyMap {
-  adjList: Record<string, string[]>;
-  edgeInfo: Record<string, string>;
-}
-
 /**
- * Builds a bidirectional adjacency list and a direction-lookup map from STADIUM_EDGES.
- * @returns adjList — maps each zone ID to its direct neighbours
- * @returns edgeInfo — maps `"fromId_toId"` to the human-readable direction string
+ * BFS Graph solver to find the shortest path and return node coordinates and directions.
  */
-function buildAdjacencyList(): AdjacencyMap {
+export function findRoute(startId: string, endId: string) {
+  if (startId === endId) {
+    const node = STADIUM_ZONES.find((z) => z.id === startId);
+    return {
+      path: [startId],
+      directions: ['You are already at your destination.'],
+      coordinates: node ? [{ x: node.x, y: node.y }] : [],
+    };
+  }
+
+  // Build adjacency list
   const adjList: Record<string, string[]> = {};
   const edgeInfo: Record<string, string> = {};
 
@@ -73,21 +72,33 @@ function buildAdjacencyList(): AdjacencyMap {
     edgeInfo[`${edge.to}_${edge.from}`] = edge.directions;
   });
 
-  return { adjList, edgeInfo };
-}
+  // Run BFS
+  const queue: string[] = [startId];
+  const visited: Record<string, boolean> = { [startId]: true };
+  const parent: Record<string, string> = {};
 
-/**
- * Reconstructs the shortest path from startId to endId by walking the BFS parent map.
- * @param parent — BFS parent map: parent[node] = the node that discovered it during traversal
- * @param startId — zone ID where the BFS began
- * @param endId — zone ID that was found
- * @returns ordered array of zone IDs from start to end (inclusive)
- */
-function reconstructPath(
-  parent: Record<string, string>,
-  startId: string,
-  endId: string
-): string[] {
+  let found = false;
+  while (queue.length > 0) {
+    const curr = queue.shift()!;
+    if (curr === endId) {
+      found = true;
+      break;
+    }
+
+    for (const neighbor of adjList[curr]) {
+      if (!visited[neighbor]) {
+        visited[neighbor] = true;
+        parent[neighbor] = curr;
+        queue.push(neighbor);
+      }
+    }
+  }
+
+  if (!found) {
+    return null;
+  }
+
+  // Reconstruct path
   const path: string[] = [];
   let temp = endId;
   while (temp !== startId) {
@@ -96,20 +107,8 @@ function reconstructPath(
   }
   path.push(startId);
   path.reverse();
-  return path;
-}
 
-interface RouteDetails {
-  directions: string[];
-  coordinates: { x: number; y: number }[];
-}
-
-/**
- * Converts an ordered zone-ID path into human-readable direction strings and SVG coordinates.
- * @param path — ordered array of zone IDs from reconstructPath
- * @param edgeInfo — direction-lookup map from buildAdjacencyList
- */
-function buildRouteDetails(path: string[], edgeInfo: Record<string, string>): RouteDetails {
+  // Reconstruct directions and coordinates
   const directions: string[] = [];
   const coordinates: { x: number; y: number }[] = [];
 
@@ -125,105 +124,9 @@ function buildRouteDetails(path: string[], edgeInfo: Record<string, string>): Ro
     }
   }
 
-  return { directions, coordinates };
-}
-
-// ---------------------------------------------------------------------------
-// Public API
-// ---------------------------------------------------------------------------
-
-const LEGACY_ID_MAP: Record<string, string> = {
-  'gate-a': ZONES.GATE_A,
-  'gate-b': ZONES.GATE_B,
-  'transit-exit': ZONES.TRANSIT_EXIT,
-  'concourse-north': ZONES.CONCOURSE_NORTH,
-  'concourse-south': ZONES.CONCOURSE_SOUTH,
-  'restrooms': ZONES.RESTROOMS,
-  'concessions': ZONES.CONCESSIONS,
-};
-
-const UUID_TO_LEGACY_MAP: Record<string, string> = Object.entries(LEGACY_ID_MAP).reduce(
-  (acc, [legacy, uuid]) => ({ ...acc, [uuid]: legacy }),
-  {}
-);
-
-/**
- * Normalizes a zone identifier (either a legacy slug like 'gate-a' or a UUID string)
- * into its canonical UUID form for internal graph traversal.
- */
-function normalizeZoneId(id: string): string {
-  return LEGACY_ID_MAP[id.toLowerCase()] || id;
-}
-
-/**
- * Formats path IDs back into legacy slugs if the original query used a legacy slug.
- */
-function formatPathIds(path: string[], useLegacy: boolean): string[] {
-  if (!useLegacy) return path;
-  return path.map((uuid) => UUID_TO_LEGACY_MAP[uuid] || uuid);
-}
-
-/**
- * BFS graph solver: finds the shortest path between two stadium zones and returns
- * the path (as zone IDs), step-by-step direction strings, and SVG coordinates.
- * Returns null if no path exists between the two zones.
- */
-export function findRoute(startId: string, endId: string) {
-  const useLegacy = LEGACY_ID_MAP[startId.toLowerCase()] !== undefined || LEGACY_ID_MAP[endId.toLowerCase()] !== undefined;
-  const normalizedStart = normalizeZoneId(startId);
-  const normalizedEnd = normalizeZoneId(endId);
-
-  if (normalizedStart === normalizedEnd) {
-    const node = STADIUM_ZONES.find((z) => z.id === normalizedStart);
-    return {
-      path: formatPathIds([normalizedStart], useLegacy),
-      directions: ['You are already at your destination.'],
-      coordinates: node ? [{ x: node.x, y: node.y }] : [],
-    };
-  }
-
-  const { adjList, edgeInfo } = buildAdjacencyList();
-
-  // Guard against non-existent node IDs to prevent TypeError during traversal
-  if (!adjList[normalizedStart] || !adjList[normalizedEnd]) {
-    return null;
-  }
-
-  // BFS traversal
-  const queue: string[] = [normalizedStart];
-  const visited: Record<string, boolean> = { [normalizedStart]: true };
-  const parent: Record<string, string> = {};
-
-  let found = false;
-  while (queue.length > 0) {
-    const curr = queue.shift()!;
-    if (curr === normalizedEnd) {
-      found = true;
-      break;
-    }
-
-    const neighbors = adjList[curr] || [];
-    for (const neighbor of neighbors) {
-      if (!visited[neighbor]) {
-        visited[neighbor] = true;
-        parent[neighbor] = curr;
-        queue.push(neighbor);
-      }
-    }
-  }
-
-  if (!found) {
-    return null;
-  }
-
-  const path = reconstructPath(parent, normalizedStart, normalizedEnd);
-  const { directions, coordinates } = buildRouteDetails(path, edgeInfo);
-
   return {
-    path: formatPathIds(path, useLegacy),
+    path,
     directions,
     coordinates,
   };
 }
-
-
