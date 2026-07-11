@@ -132,16 +132,51 @@ function buildRouteDetails(path: string[], edgeInfo: Record<string, string>): Ro
 // Public API
 // ---------------------------------------------------------------------------
 
+const LEGACY_ID_MAP: Record<string, string> = {
+  'gate-a': ZONES.GATE_A,
+  'gate-b': ZONES.GATE_B,
+  'transit-exit': ZONES.TRANSIT_EXIT,
+  'concourse-north': ZONES.CONCOURSE_NORTH,
+  'concourse-south': ZONES.CONCOURSE_SOUTH,
+  'restrooms': ZONES.RESTROOMS,
+  'concessions': ZONES.CONCESSIONS,
+};
+
+const UUID_TO_LEGACY_MAP: Record<string, string> = Object.entries(LEGACY_ID_MAP).reduce(
+  (acc, [legacy, uuid]) => ({ ...acc, [uuid]: legacy }),
+  {}
+);
+
+/**
+ * Normalizes a zone identifier (either a legacy slug like 'gate-a' or a UUID string)
+ * into its canonical UUID form for internal graph traversal.
+ */
+function normalizeZoneId(id: string): string {
+  return LEGACY_ID_MAP[id.toLowerCase()] || id;
+}
+
+/**
+ * Formats path IDs back into legacy slugs if the original query used a legacy slug.
+ */
+function formatPathIds(path: string[], useLegacy: boolean): string[] {
+  if (!useLegacy) return path;
+  return path.map((uuid) => UUID_TO_LEGACY_MAP[uuid] || uuid);
+}
+
 /**
  * BFS graph solver: finds the shortest path between two stadium zones and returns
  * the path (as zone IDs), step-by-step direction strings, and SVG coordinates.
  * Returns null if no path exists between the two zones.
  */
 export function findRoute(startId: string, endId: string) {
-  if (startId === endId) {
-    const node = STADIUM_ZONES.find((z) => z.id === startId);
+  const useLegacy = LEGACY_ID_MAP[startId.toLowerCase()] !== undefined || LEGACY_ID_MAP[endId.toLowerCase()] !== undefined;
+  const normalizedStart = normalizeZoneId(startId);
+  const normalizedEnd = normalizeZoneId(endId);
+
+  if (normalizedStart === normalizedEnd) {
+    const node = STADIUM_ZONES.find((z) => z.id === normalizedStart);
     return {
-      path: [startId],
+      path: formatPathIds([normalizedStart], useLegacy),
       directions: ['You are already at your destination.'],
       coordinates: node ? [{ x: node.x, y: node.y }] : [],
     };
@@ -149,20 +184,26 @@ export function findRoute(startId: string, endId: string) {
 
   const { adjList, edgeInfo } = buildAdjacencyList();
 
+  // Guard against non-existent node IDs to prevent TypeError during traversal
+  if (!adjList[normalizedStart] || !adjList[normalizedEnd]) {
+    return null;
+  }
+
   // BFS traversal
-  const queue: string[] = [startId];
-  const visited: Record<string, boolean> = { [startId]: true };
+  const queue: string[] = [normalizedStart];
+  const visited: Record<string, boolean> = { [normalizedStart]: true };
   const parent: Record<string, string> = {};
 
   let found = false;
   while (queue.length > 0) {
     const curr = queue.shift()!;
-    if (curr === endId) {
+    if (curr === normalizedEnd) {
       found = true;
       break;
     }
 
-    for (const neighbor of adjList[curr]) {
+    const neighbors = adjList[curr] || [];
+    for (const neighbor of neighbors) {
       if (!visited[neighbor]) {
         visited[neighbor] = true;
         parent[neighbor] = curr;
@@ -175,9 +216,14 @@ export function findRoute(startId: string, endId: string) {
     return null;
   }
 
-  const path = reconstructPath(parent, startId, endId);
+  const path = reconstructPath(parent, normalizedStart, normalizedEnd);
   const { directions, coordinates } = buildRouteDetails(path, edgeInfo);
 
-  return { path, directions, coordinates };
+  return {
+    path: formatPathIds(path, useLegacy),
+    directions,
+    coordinates,
+  };
 }
+
 
