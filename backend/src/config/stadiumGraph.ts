@@ -44,20 +44,21 @@ export const STADIUM_EDGES: GraphEdge[] = [
   { from: ZONES.CONCOURSE_SOUTH, to: ZONES.CONCESSIONS, directions: 'Head north-east along the outer ring for 80m.' },
 ];
 
-/**
- * BFS Graph solver to find the shortest path and return node coordinates and directions.
- */
-export function findRoute(startId: string, endId: string) {
-  if (startId === endId) {
-    const node = STADIUM_ZONES.find((z) => z.id === startId);
-    return {
-      path: [startId],
-      directions: ['You are already at your destination.'],
-      coordinates: node ? [{ x: node.x, y: node.y }] : [],
-    };
-  }
+// ---------------------------------------------------------------------------
+// Private helpers — split out of findRoute to reduce function complexity
+// ---------------------------------------------------------------------------
 
-  // Build adjacency list
+interface AdjacencyMap {
+  adjList: Record<string, string[]>;
+  edgeInfo: Record<string, string>;
+}
+
+/**
+ * Builds a bidirectional adjacency list and a direction-lookup map from STADIUM_EDGES.
+ * @returns adjList — maps each zone ID to its direct neighbours
+ * @returns edgeInfo — maps `"fromId_toId"` to the human-readable direction string
+ */
+function buildAdjacencyList(): AdjacencyMap {
   const adjList: Record<string, string[]> = {};
   const edgeInfo: Record<string, string> = {};
 
@@ -72,7 +73,83 @@ export function findRoute(startId: string, endId: string) {
     edgeInfo[`${edge.to}_${edge.from}`] = edge.directions;
   });
 
-  // Run BFS
+  return { adjList, edgeInfo };
+}
+
+/**
+ * Reconstructs the shortest path from startId to endId by walking the BFS parent map.
+ * @param parent — BFS parent map: parent[node] = the node that discovered it during traversal
+ * @param startId — zone ID where the BFS began
+ * @param endId — zone ID that was found
+ * @returns ordered array of zone IDs from start to end (inclusive)
+ */
+function reconstructPath(
+  parent: Record<string, string>,
+  startId: string,
+  endId: string
+): string[] {
+  const path: string[] = [];
+  let temp = endId;
+  while (temp !== startId) {
+    path.push(temp);
+    temp = parent[temp];
+  }
+  path.push(startId);
+  path.reverse();
+  return path;
+}
+
+interface RouteDetails {
+  directions: string[];
+  coordinates: { x: number; y: number }[];
+}
+
+/**
+ * Converts an ordered zone-ID path into human-readable direction strings and SVG coordinates.
+ * @param path — ordered array of zone IDs from reconstructPath
+ * @param edgeInfo — direction-lookup map from buildAdjacencyList
+ */
+function buildRouteDetails(path: string[], edgeInfo: Record<string, string>): RouteDetails {
+  const directions: string[] = [];
+  const coordinates: { x: number; y: number }[] = [];
+
+  for (let i = 0; i < path.length; i++) {
+    const nodeId = path[i];
+    const node = STADIUM_ZONES.find((z) => z.id === nodeId)!;
+    coordinates.push({ x: node.x, y: node.y });
+
+    if (i < path.length - 1) {
+      const nextNodeId = path[i + 1];
+      const dirText = edgeInfo[`${nodeId}_${nextNodeId}`] || 'Proceed to the next zone.';
+      directions.push(dirText);
+    }
+  }
+
+  return { directions, coordinates };
+}
+
+// ---------------------------------------------------------------------------
+// Public API
+// ---------------------------------------------------------------------------
+
+/**
+ * BFS graph solver: finds the shortest path between two stadium zones and returns
+ * the path (as zone IDs), step-by-step direction strings, and SVG coordinates.
+ * Returns null if no path exists between the two zones.
+ */
+export function findRoute(startId: string, endId: string) {
+  if (startId === endId) {
+    const node = STADIUM_ZONES.find((z) => z.id === startId);
+    return {
+      path: [startId],
+      directions: ['You are already at your destination.'],
+      coordinates: node ? [{ x: node.x, y: node.y }] : [],
+    };
+  }
+
+  const { adjList, edgeInfo } = buildAdjacencyList();
+
+  // BFS traversal
   const queue: string[] = [startId];
   const visited: Record<string, boolean> = { [startId]: true };
   const parent: Record<string, string> = {};
@@ -98,35 +175,9 @@ export function findRoute(startId: string, endId: string) {
     return null;
   }
 
-  // Reconstruct path
-  const path: string[] = [];
-  let temp = endId;
-  while (temp !== startId) {
-    path.push(temp);
-    temp = parent[temp];
-  }
-  path.push(startId);
-  path.reverse();
+  const path = reconstructPath(parent, startId, endId);
+  const { directions, coordinates } = buildRouteDetails(path, edgeInfo);
 
-  // Reconstruct directions and coordinates
-  const directions: string[] = [];
-  const coordinates: { x: number; y: number }[] = [];
-
-  for (let i = 0; i < path.length; i++) {
-    const nodeId = path[i];
-    const node = STADIUM_ZONES.find((z) => z.id === nodeId)!;
-    coordinates.push({ x: node.x, y: node.y });
-
-    if (i < path.length - 1) {
-      const nextNodeId = path[i + 1];
-      const dirText = edgeInfo[`${nodeId}_${nextNodeId}`] || 'Proceed to the next zone.';
-      directions.push(dirText);
-    }
-  }
-
-  return {
-    path,
-    directions,
-    coordinates,
-  };
+  return { path, directions, coordinates };
 }
+
